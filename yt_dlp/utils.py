@@ -6507,6 +6507,147 @@ class FormatSorter:
         return tuple(self._calculate_field_preference(format, field) for field in self._order)
 
 
+class LangSelector:
+    @staticmethod
+    def _simple_lang_formatter(lang: str) -> str:
+        return lang.casefold().strip()
+
+    _LANG_FORMATTER = _simple_lang_formatter
+    _REGEX_FINDER = re.compile(r'^\s*[$!](?P<pattern>.+?)\s*$')
+    _REGEX_FLAGS = re.IGNORECASE
+    _SECTION_SEPARATOR = re.compile(r'(?<!\\),')
+    _PRIORITY_SEPARATOR = re.compile(r'(?<!\\)>{1,2}')
+
+    ALL_FINDER = re.compile(r'^\s*(all|\*+)\s*$', re.IGNORECASE)
+    ALL_PATTERN = re.compile(r'.*', re.DOTALL)
+    UNKNOWN_FINDER = re.compile(r'^\s*(unknown|\?+)\s*$', re.IGNORECASE)
+    UNKNOWN_PATTERN = re.compile(r'^$|^\s*(unknown|\?+)\s*$', re.IGNORECASE)
+    DEFAULT_FINDER = re.compile(r'^\s*(default|~+)\s*$', re.IGNORECASE)
+
+    @staticmethod
+    def get_standard_mapper(default_key=None):
+        mapper = {
+            LangSelector.ALL_FINDER: LangSelector.ALL_PATTERN,
+            LangSelector.UNKNOWN_FINDER: LangSelector.UNKNOWN_PATTERN,
+        }
+        if default_key:
+            mapper[LangSelector.DEFAULT_FINDER] = default_key
+        return mapper
+
+    @staticmethod
+    def normalize(selection, mapper=None,
+                  lang_formatter=_LANG_FORMATTER,
+                  regex_finder=_REGEX_FINDER, regex_flags=_REGEX_FLAGS,
+                  section_sep=_SECTION_SEPARATOR, priority_sep=_PRIORITY_SEPARATOR,
+                  default=None):
+        def part_exchanger(part):
+            if isinstance(part, re.Pattern):
+                return part
+            if isinstance(part, str):
+                for finder, replacement in (mapper or {}).items():
+                    if (isinstance(finder, str) and finder.casefold() in part.casefold()) \
+                            or (isinstance(finder, re.Pattern) and finder.match(part)):
+                        return replacement
+
+                part_matcher = regex_finder and re.match(regex_finder, part)
+                if part_matcher:
+                    part_pattern = part_matcher.group('pattern')
+                    if not part_pattern:
+                        raise ValueError('\'regex_finder\' does not contain a group named \'pattern\'')
+                    return re.compile(part_pattern, regex_flags or 0)
+                return part
+            return None
+
+        def part_normalizer(part):
+            return lang_formatter(part) \
+                if lang_formatter and isinstance(part, str) \
+                else part
+
+        def section_normalizer(section):
+            parts = (re.split(priority_sep, section) if priority_sep else [section]) \
+                if isinstance(section, str) else section
+            return list(filter(None, map(part_normalizer, map(part_exchanger, parts))))
+
+        selection = selection or ([[default]] if default else [])
+        sections = (re.split(section_sep, selection) if section_sep else [selection]) \
+            if isinstance(selection, str) else selection
+        return list(filter(None, map(section_normalizer, filter(None, sections)))), lang_formatter
+
+    @staticmethod
+    def format_lang(lang, formatter):
+        lang = lang or ''
+        if formatter and isinstance(lang, str):
+            lang = formatter(lang)
+        return lang
+
+    @staticmethod
+    def format_langs(langs, formatter):
+        def lang_formatter(lang):
+            return LangSelector.format_lang(lang, formatter)
+        return list(map(lang_formatter, langs))
+
+    @staticmethod
+    def format_lang_table(lang_table, formatter):
+        if isinstance(lang_table, dict):
+            lang_table = lang_table.items()
+        lang_table = [(key, LangSelector.format_lang(lang, formatter))
+                      for key, lang in lang_table]
+        return lang_table, list(map(lambda elem: elem[1], lang_table))
+
+    @staticmethod
+    def _expression_matches(expr, lang):
+        if isinstance(expr, re.Pattern):
+            return expr.fullmatch(lang)
+        elif isinstance(expr, str):
+            return lang == expr
+        return False
+
+    @staticmethod
+    def find_match_in_section(section, langs, matcher=_expression_matches):
+        for part in section:
+            matching_lang = next((lang for lang in langs if matcher(part, lang)), None)
+            if matching_lang:
+                return matching_lang
+        return None
+
+    @staticmethod
+    def find_match_in_selection(selection, target, langs, matcher=_expression_matches):
+        for section in selection:
+            matching_lang = LangSelector.find_match_in_section(section, langs, matcher)
+            if matching_lang and matcher(target, matching_lang):
+                return matching_lang, section
+        return None
+
+    @staticmethod
+    def get_matches_in_selection(selection, langs, matcher=_expression_matches):
+        def match_finder(section):
+            return LangSelector.find_match_in_section(section, langs, matcher)
+        return set(map(match_finder, selection))
+
+    def __init__(self, selection, mapper=None, default_key=None, **kwargs):
+        if mapper is None:
+            mapper = LangSelector.get_standard_mapper(default_key)
+
+        self.selection, self.formatter = LangSelector.normalize(
+            selection, mapper, default=default_key, **kwargs)
+
+    def matches(self, target, langs, matcher=_expression_matches):
+        target = LangSelector.format_lang(target, self.formatter)
+        langs = LangSelector.format_langs(langs, self.formatter)
+        return LangSelector.find_match_in_selection(self.selection, target, langs, matcher)
+
+    def get_matches(self, lang_table, matcher=_expression_matches):
+        lang_table, langs = LangSelector.format_lang_table(lang_table, self.formatter)
+        matching_langs = LangSelector.get_matches_in_selection(self.selection, langs, matcher)
+        return lang_table, matching_langs
+
+    def keep_matches(self, lang_table, matcher=_expression_matches):
+        lang_table, matching_langs = self.get_matches(lang_table, matcher)
+        key_keeper = lambda elem: elem[0]
+        lang_filter = lambda elem: elem[1] in matching_langs
+        return set(map(key_keeper, filter(lang_filter, lang_table)))
+
+
 # Deprecated
 has_certifi = bool(certifi)
 has_websockets = bool(websockets)

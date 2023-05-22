@@ -6529,6 +6529,7 @@ class LangSelector:
     _EXPR_FORMATTER = _expression_format
     _EXPR_MATCHER = _expression_matches
 
+    _ESCAPED_CHAR_FINDER = re.compile(r'\\(?P<content>.)')
     _REGEX_FINDER = re.compile(r'^\s*[$!](?P<pattern>.*?)\s*$')
     _REGEX_FLAGS = re.IGNORECASE
     _SECTION_SEPARATOR = re.compile(r'(?<!\\),')
@@ -6552,9 +6553,22 @@ class LangSelector:
     @staticmethod
     def normalize(selection, mapper=None,
                   expr_formatter=_EXPR_FORMATTER,
+                  escaped_char_finder=_ESCAPED_CHAR_FINDER,
                   regex_finder=_REGEX_FINDER, regex_flags=_REGEX_FLAGS,
                   section_sep=_SECTION_SEPARATOR, priority_sep=_PRIORITY_SEPARATOR,
                   default=None):
+        def unescape(expr):
+            return re.sub(escaped_char_finder, r'\g<content>', expr) \
+                if escaped_char_finder else expr
+
+        def section_split(str_section):
+            return map(unescape, re.split(priority_sep, str_section)) \
+                if priority_sep else [str_section]
+
+        def selection_split(str_selection):
+            return re.split(section_sep, str_selection) \
+                if section_sep else [str_selection]
+
         def expr_normalizer(expr):
             if expr is None:
                 return None
@@ -6576,12 +6590,10 @@ class LangSelector:
             return formatted_expr
 
         def section_normalizer(section):
-            expressions = (re.split(priority_sep, section) if priority_sep else [section]) \
-                if isinstance(section, str) else section
+            expressions = section_split(section) if isinstance(section, str) else section
             return list(map(expr_normalizer, expressions))
 
-        sections = (re.split(section_sep, selection) if section_sep else [selection]) \
-            if isinstance(selection, str) else (selection or [])
+        sections = selection_split(selection) if isinstance(selection, str) else (selection or [])
         sections = list(filter(None, sections)) or ([[default]] if default else [])
         return list(map(section_normalizer, sections)), expr_formatter
 

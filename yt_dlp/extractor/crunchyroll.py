@@ -9,6 +9,7 @@ from ..utils import (
     format_field,
     int_or_none,
     join_nonempty,
+    LangSelector,
     parse_age_limit,
     parse_count,
     parse_iso8601,
@@ -31,6 +32,7 @@ class CrunchyrollBaseIE(InfoExtractor):
     _API_ENDPOINT = None
     _BASIC_AUTH = None
     _QUERY = {}
+    _DEFAULT_LANG = '@@default'
 
     @property
     def is_logged_in(self):
@@ -129,27 +131,26 @@ class CrunchyrollBaseIE(InfoExtractor):
         return self._configuration_arg('language', ie_key=ie_key, casesense=False)
 
     @staticmethod
-    def _format_audio_lang(audio_lang: str) -> str:
-        return audio_lang.casefold().strip()
-
-    @staticmethod
-    def _format_requested_langs(requested_langs):
+    def _get_requested_lang_selector(requested_langs):
         # Requested Language options:
-        # 'default'   = Include audio language of video with 'internal_id'
-        # 'unknown'   = Include all unknown audio languages
-        # 'all'       = Include all possible languages (will override all other options)
-        # <lang-code> = Include specific audio language e.g. 'ja-JP' or 'en-US'
+        # 'default' or '~'     = Include audio language of video with 'internal_id'
+        # 'unknown' or '?'     = Include all unknown audio languages
+        # 'all'     or '*'     = Include all possible languages (will override all other options)
+        # '{lang-code}'        = Include specific audio language e.g. 'ja-JP' or 'en-US'
+        # '${lang-code-regex}' = Include specific audio language using regex e.g. '$ja.*' or '$en.*'
+        # '{any1} > {any2}'    = Priority group -> Try `any1`, if not available `any2`
+        #                        e.g. '$ja.* > en-US > ~' (Try '$ja.*', then 'en-US' and then `default`)
+        # '{group1}, {group2}' = Separate different `priority groups` by ','
+        # > Hint: Escape a character by prefixing it with '\'
 
         # Format requested_langs
-        lang_formatter = CrunchyrollBaseIE._format_audio_lang
-        requested_langs = list(map(lang_formatter, requested_langs or ['default']))
-        if 'all' in requested_langs:
-            requested_langs = []
-        return requested_langs
+        default_lang_val = CrunchyrollBaseIE._DEFAULT_LANG
+        expr_mapper = LangSelector.get_standard_mapper(default_val=default_lang_val)
+        return LangSelector(requested_langs, mapper=expr_mapper, default_val=default_lang_val)
 
     @staticmethod
     def _get_audio_langs_from_data(data):
-        lang_formatter = CrunchyrollBaseIE._format_audio_lang
+        lang_formatter = lambda v: v.casefold().strip()
         wrap_in_list = lambda v: v and [v]
 
         # Find audio languages in 'audio_locales' and 'audio_locale' and merge them into a case-folded set
@@ -157,38 +158,10 @@ class CrunchyrollBaseIE(InfoExtractor):
         audio_langs.update(traverse_obj(data, ('audio_locale', {lang_formatter}, {wrap_in_list}), default=[]))
         return audio_langs
 
-    @staticmethod
-    def _get_requested_lang_evaluator(requested_langs):
-        def is_requested_lang(audio_langs, allow_if_unknown=False):
-            audio_langs = audio_langs or {'unknown'}
-            # Is True if 'requested_langs' is empty ('all' languages were requested / are allowed)
-            # or if 'allow_if_unknown' is set and no language codes are specified in 'audio_langs'
-            # or if any of the specified languages in 'audio_langs' is in 'requested_langs'
-            return not requested_langs \
-                or (allow_if_unknown and 'unknown' in audio_langs) \
-                or any(la in requested_langs for la in audio_langs)
-        return is_requested_lang
-
-    @staticmethod
-    def _wrap_requested_lang_in_data_evaluator(requested_langs, is_requested_lang):
-        def is_requested_lang_in_data(data, allow_if_unknown=False):
-            # Is True if 'requested_langs' is empty ('all' languages were requested / are allowed)
-            # or if 'allow_if_unknown' is set and no language codes were found in 'data'
-            # or if any of the found languages from 'data' is in 'requested_langs'
-            return not requested_langs or is_requested_lang(
-                CrunchyrollBaseIE._get_audio_langs_from_data(data),
-                allow_if_unknown)
-        return is_requested_lang_in_data
-
-    @staticmethod
-    def _has_requested_default_lang(requested_langs):
-        return 'default' in requested_langs
-
     def _get_responses_for_langs(self, internal_id, get_response_by_id, requested_langs):
-        requested_langs = self._format_requested_langs(requested_langs)
-        is_requested_lang = self._get_requested_lang_evaluator(requested_langs)
-        is_requested_lang_in_data = self._wrap_requested_lang_in_data_evaluator(
-            requested_langs, is_requested_lang)
+        requested_lang_selector = self._get_requested_lang_selector(requested_langs)
+        default_lang = CrunchyrollBaseIE._DEFAULT_LANG
+        langs_fetcher = self._get_audio_langs_from_data
 
         def get_meta_from_response(response):
             object_type = response.get('type')
@@ -202,30 +175,28 @@ class CrunchyrollBaseIE(InfoExtractor):
                 expected=True)
         default_meta = get_meta_from_response(default_response)
 
+        # Build lang table and keep selected langs
+        versions = (default_meta and traverse_obj(default_meta, 'versions')) or []
+        lang_table = [(version.get('guid'), langs_fetcher(version)) for version in versions]
+        lang_table = [(vid, lang) for vid, langs in lang_table if vid for lang in (langs or [None])]
+        lang_table.append((internal_id, default_lang))
+        requested_ids = requested_lang_selector.keep_table_matches(lang_table)
+
         # Result dict to store requested responses in
         results = {}
-
-        # Add default response if requested
-        if self._has_requested_default_lang(requested_langs) \
-                or (default_meta and is_requested_lang_in_data(default_meta)):
-            results[internal_id] = default_response
-
-        # Iterate other versions and add them if requested
-        versions = (default_meta and traverse_obj(default_meta, 'versions')) or []
-        requested_versions = [version for version in versions
-                              if version and is_requested_lang_in_data(version)]
-        for version in requested_versions:
-            version_id = version.get('guid')
-            if not version_id or version_id in results:
-                continue
-            # Fetch response for current version (will be on a different video page)
-            requested_response = get_response_by_id(version_id)
-            if not requested_response:
-                self.to_screen(
-                    f'Requested video version with id {version_id} could not be found (possibly region locked?)',
-                    only_once=True)
-            results[version_id] = requested_response
-
+        # Iterate requested ids and fetch their responses
+        for vid in requested_ids:
+            if vid == internal_id:
+                # Use default response
+                requested_response = default_response
+            else:
+                # Fetch response for current version (will be on a different video page)
+                requested_response = get_response_by_id(vid)
+                if not requested_response:
+                    self.to_screen(
+                        f'Requested video version with id {vid} could not be found (possibly region locked?)',
+                        only_once=True)
+            results[vid] = requested_response
         return results
 
     def _extract_formats(self, stream_response, display_id=None):
@@ -632,37 +603,36 @@ class CrunchyrollBetaShowIE(CrunchyrollCmsBaseIE):
 
         # Fetch requested languages (for Crunchyroll 'single episode' extractor)
         requested_langs = self._get_requested_langs_from_extractor_args(ie_key=CrunchyrollBetaIE.ie_key())
-        requested_langs = self._format_requested_langs(requested_langs)
-        if self._has_requested_default_lang(requested_langs):
-            # If default is specified, use the default behavior (i.e. all languages are extracted).
-            # An empty array means allow any language (the same as if 'all' were set).
-            requested_langs = []
-        is_requested_lang = self._get_requested_lang_evaluator(requested_langs)
+        requested_lang_selector = self._get_requested_lang_selector(requested_langs)
+        default_lang = CrunchyrollBaseIE._DEFAULT_LANG
 
-        def entries():
+        def episode_responses():
             seasons_response = self._call_cms_api_signed(f'seasons?series_id={internal_id}', internal_id, lang, 'seasons')
             for season in traverse_obj(seasons_response, ('items', ..., {dict})):
-                # Skip the extraction of a 'season' if its language is known, and it was not requested
-                # (If the language of 'season' is unknown then do not skip it -> Hence 'allow_if_unknown=True')
-                season_audio_langs = self._get_audio_langs_from_data(season)
-                if not is_requested_lang(season_audio_langs, allow_if_unknown=True):
-                    continue
-
                 episodes_response = self._call_cms_api_signed(
                     f'episodes?season_id={season["id"]}', season["id"], lang, 'episode list')
                 for episode_response in traverse_obj(episodes_response, ('items', ..., {dict})):
-                    # Skip the extraction of an episode if its language was not requested
-                    episode_audio_langs = self._get_audio_langs_from_data(episode_response)
-                    if not is_requested_lang(episode_audio_langs):
-                        continue
+                    yield episode_response["id"], episode_response
 
+        episode_table = [(eid, self._get_audio_langs_from_data(resp) or {}, resp)
+                         for eid, resp in episode_responses() if eid]
+        episode_langs = {lang for _, langs, _ in episode_table
+                         for lang in (langs or [None])}
+        episode_langs.add(default_lang)
+        matching_langs = requested_lang_selector.get_list_matches(episode_langs)
+        matching_default = requested_lang_selector.has_match(default_lang, matching_langs)
+
+        def entries():
+            for ep_id, ep_langs, ep_response in episode_table:
+                if matching_default or requested_lang_selector.has_matches(
+                        ep_langs or [None], matching_langs):
                     smuggled_data = {
-                        'target_audio_langs': list(episode_audio_langs) or ['default'],
+                        'target_audio_langs': list(ep_langs) or ['~'],
                     }
 
                     yield self.url_result(
-                        smuggle_url(f'{self._BASE_URL}/{lang}watch/{episode_response["id"]}', smuggled_data),
-                        CrunchyrollBetaIE, **CrunchyrollBetaIE._transform_episode_response(episode_response))
+                        smuggle_url(f'{self._BASE_URL}/{lang}watch/{ep_id}', smuggled_data),
+                        CrunchyrollBetaIE, **CrunchyrollBetaIE._transform_episode_response(ep_response))
 
         return self.playlist_result(
             entries(), internal_id,

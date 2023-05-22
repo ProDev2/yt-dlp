@@ -6518,8 +6518,8 @@ class LangSelector:
 
     @staticmethod
     def _expression_matches(expr, lang):
-        if not expr and not lang:
-            return True
+        if not lang:
+            return not expr
         elif isinstance(expr, re.Pattern):
             return expr.fullmatch(lang)
         elif isinstance(expr, str):

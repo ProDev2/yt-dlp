@@ -6580,12 +6580,10 @@ class LangSelector:
                 if isinstance(section, str) else section
             return list(map(expr_normalizer, expressions))
 
-        default = [[default]] if default else []
-        selection = selection or default
         sections = (re.split(section_sep, selection) if section_sep else [selection]) \
-            if isinstance(selection, str) else selection
-        return list(filter(None, map(section_normalizer, filter(None, sections)))) \
-            or default, expr_formatter
+            if isinstance(selection, str) else (selection or [])
+        sections = list(filter(None, sections)) or ([[default]] if default else [])
+        return list(map(section_normalizer, sections)), expr_formatter
 
     @staticmethod
     def format_expr(expr, formatter):

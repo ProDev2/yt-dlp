@@ -6618,44 +6618,67 @@ class LangSelector:
     @staticmethod
     def find_match_in_section(section, langs, matcher=_EXPR_MATCHER):
         for expr in section:
-            matching_lang = next((lang for lang in langs if matcher(expr, lang)), None)
-            if matching_lang:
-                return matching_lang
-        return None
+            for lang in langs:
+                if matcher(expr, lang):
+                    return True, lang
+        return False, None
 
     @staticmethod
     def find_match_in_selection(selection, target, langs, matcher=_EXPR_MATCHER):
         for section in selection:
-            matching_lang = LangSelector.find_match_in_section(section, langs, matcher)
-            if matching_lang and matcher(target, matching_lang):
-                return matching_lang, section
-        return None
+            found, lang = LangSelector.find_match_in_section(section, langs, matcher)
+            if found and matcher(target, lang):
+                return section, lang
+        return False, None
 
     @staticmethod
     def get_matches_in_selection(selection, langs, matcher=_EXPR_MATCHER):
-        def match_finder(section):
-            return LangSelector.find_match_in_section(section, langs, matcher)
-        return set(map(match_finder, selection))
+        def match_finder():
+            for section in selection:
+                found, lang = LangSelector.find_match_in_section(section, langs, matcher)
+                if found:
+                    yield lang
+        return set(match_finder())
 
-    def __init__(self, selection, mapper=None, default_val=None, **kwargs):
+    def __init__(self, selection, mapper=None, default_val=None, expr_matcher=None, **kwargs):
         if mapper is None:
             mapper = LangSelector.get_standard_mapper(default_val)
 
         self.selection, self.formatter = LangSelector.normalize(
             selection, mapper, default=default_val, **kwargs)
+        self.matcher = expr_matcher or LangSelector._EXPR_MATCHER
 
-    def matches(self, target, langs, matcher=_EXPR_MATCHER):
+    def matches(self, target, langs):
         target = LangSelector.format_expr(target, self.formatter)
         langs = LangSelector.format_expr_list(langs, self.formatter)
-        return LangSelector.find_match_in_selection(self.selection, target, langs, matcher)
+        return LangSelector.find_match_in_selection(self.selection, target, langs, self.matcher)
 
-    def get_matches(self, lang_table, matcher=_EXPR_MATCHER):
+    def has_match(self, target, matching_langs):
+        target = LangSelector.format_expr(target, self.formatter)
+        for lang in matching_langs:
+            if self.matcher(target, lang):
+                return True, lang
+        return False, None
+
+    def has_one_match(self, targets, matching_langs):
+        for target in targets:
+            found, lang = self.has_match(target, matching_langs)
+            if found:
+                return True, lang
+        return False, None
+
+    def get_list_matches(self, lang_list):
+        langs = LangSelector.format_expr_list(lang_list, self.formatter)
+        matching_langs = LangSelector.get_matches_in_selection(self.selection, langs, self.matcher)
+        return matching_langs
+
+    def get_table_matches(self, lang_table):
         lang_table, langs = LangSelector.format_expr_table(lang_table, self.formatter)
-        matching_langs = LangSelector.get_matches_in_selection(self.selection, langs, matcher)
+        matching_langs = LangSelector.get_matches_in_selection(self.selection, langs, self.matcher)
         return lang_table, matching_langs
 
-    def keep_matches(self, lang_table, matcher=_EXPR_MATCHER):
-        lang_table, matching_langs = self.get_matches(lang_table, matcher)
+    def keep_table_matches(self, lang_table):
+        lang_table, matching_langs = self.get_table_matches(lang_table)
         key_keeper = lambda elem: elem[0]
         lang_filter = lambda elem: elem[1] in matching_langs
         return set(map(key_keeper, filter(lang_filter, lang_table)))

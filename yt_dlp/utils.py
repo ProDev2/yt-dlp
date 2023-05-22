@@ -6518,9 +6518,10 @@ class LangSelector:
 
     @staticmethod
     def _expression_matches(expr, lang):
-        if not lang:
-            return not expr
-        elif isinstance(expr, re.Pattern):
+        if not expr and not lang:
+            return True
+        lang = lang or ''
+        if isinstance(expr, re.Pattern):
             return expr.fullmatch(lang)
         elif isinstance(expr, str):
             return lang == expr
@@ -6618,27 +6619,23 @@ class LangSelector:
     @staticmethod
     def find_match_in_section(section, langs, matcher=_EXPR_MATCHER):
         for expr in section:
-            for lang in langs:
-                if matcher(expr, lang):
-                    return True, lang
-        return False, None
+            matches = [lang for lang in langs if matcher(expr, lang)]
+            if matches:
+                return matches
+        return []
 
     @staticmethod
     def find_match_in_selection(selection, target, langs, matcher=_EXPR_MATCHER):
         for section in selection:
-            found, lang = LangSelector.find_match_in_section(section, langs, matcher)
-            if found and matcher(target, lang):
-                return section, lang
+            for match in LangSelector.find_match_in_section(section, langs, matcher):
+                if matcher(target, match):
+                    return section, match
         return False, None
 
     @staticmethod
     def get_matches_in_selection(selection, langs, matcher=_EXPR_MATCHER):
-        def match_finder():
-            for section in selection:
-                found, lang = LangSelector.find_match_in_section(section, langs, matcher)
-                if found:
-                    yield lang
-        return set(match_finder())
+        return {match for section in selection
+                for match in LangSelector.find_match_in_section(section, langs, matcher)}
 
     def __init__(self, selection, mapper=None, default_val=None, expr_matcher=None, **kwargs):
         if mapper is None:
@@ -6655,17 +6652,13 @@ class LangSelector:
 
     def has_match(self, target, matching_langs):
         target = LangSelector.format_expr(target, self.formatter)
-        for lang in matching_langs:
-            if self.matcher(target, lang):
-                return True, lang
-        return False, None
+        return [lang
+                for lang in matching_langs if self.matcher(target, lang)]
 
-    def has_one_match(self, targets, matching_langs):
-        for target in targets:
-            found, lang = self.has_match(target, matching_langs)
-            if found:
-                return True, lang
-        return False, None
+    def has_matches(self, targets, matching_langs):
+        targets = LangSelector.format_expr_list(targets, self.formatter)
+        return [lang for target in targets
+                for lang in matching_langs if self.matcher(target, lang)]
 
     def get_list_matches(self, lang_list):
         langs = LangSelector.format_expr_list(lang_list, self.formatter)

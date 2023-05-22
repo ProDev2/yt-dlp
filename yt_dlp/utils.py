@@ -6509,7 +6509,7 @@ class FormatSorter:
 
 class LangSelector:
     @staticmethod
-    def _expression_formatter(expr):
+    def _expression_format(expr):
         if isinstance(expr, re.Pattern):
             return expr
         elif isinstance(expr, str):
@@ -6526,7 +6526,7 @@ class LangSelector:
             return lang == expr
         return False
 
-    _EXPR_FORMATTER = _expression_formatter
+    _EXPR_FORMATTER = _expression_format
     _EXPR_MATCHER = _expression_matches
 
     _REGEX_FINDER = re.compile(r'^\s*[$!](?P<pattern>.*?)\s*$')

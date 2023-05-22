@@ -6509,11 +6509,27 @@ class FormatSorter:
 
 class LangSelector:
     @staticmethod
-    def _simple_lang_formatter(lang: str) -> str:
-        return lang.casefold().strip()
+    def _expression_formatter(expr):
+        if isinstance(expr, re.Pattern):
+            return expr
+        elif isinstance(expr, str):
+            return expr.casefold().strip()
+        return None
 
-    _LANG_FORMATTER = _simple_lang_formatter
-    _REGEX_FINDER = re.compile(r'^\s*[$!](?P<pattern>.+?)\s*$')
+    @staticmethod
+    def _expression_matches(expr, lang):
+        if not expr and not lang:
+            return True
+        elif isinstance(expr, re.Pattern):
+            return expr.fullmatch(lang)
+        elif isinstance(expr, str):
+            return lang == expr
+        return False
+
+    _EXPR_FORMATTER = _expression_formatter
+    _EXPR_MATCHER = _expression_matches
+
+    _REGEX_FINDER = re.compile(r'^\s*[$!](?P<pattern>.*?)\s*$')
     _REGEX_FLAGS = re.IGNORECASE
     _SECTION_SEPARATOR = re.compile(r'(?<!\\),')
     _PRIORITY_SEPARATOR = re.compile(r'(?<!\\)>{1,2}')
@@ -6521,97 +6537,82 @@ class LangSelector:
     ALL_FINDER = re.compile(r'^\s*(all|\*+)\s*$', re.IGNORECASE)
     ALL_PATTERN = re.compile(r'.*', re.DOTALL)
     UNKNOWN_FINDER = re.compile(r'^\s*(unknown|\?+)\s*$', re.IGNORECASE)
-    UNKNOWN_PATTERN = re.compile(r'^$|^\s*(unknown|\?+)\s*$', re.IGNORECASE)
     DEFAULT_FINDER = re.compile(r'^\s*(default|~+)\s*$', re.IGNORECASE)
 
     @staticmethod
-    def get_standard_mapper(default_key=None):
+    def get_standard_mapper(default_val=None):
         mapper = {
             LangSelector.ALL_FINDER: LangSelector.ALL_PATTERN,
-            LangSelector.UNKNOWN_FINDER: LangSelector.UNKNOWN_PATTERN,
+            LangSelector.UNKNOWN_FINDER: None,
         }
-        if default_key:
-            mapper[LangSelector.DEFAULT_FINDER] = default_key
+        if default_val:
+            mapper[LangSelector.DEFAULT_FINDER] = default_val
         return mapper
 
     @staticmethod
     def normalize(selection, mapper=None,
-                  lang_formatter=_LANG_FORMATTER,
+                  expr_formatter=_EXPR_FORMATTER,
                   regex_finder=_REGEX_FINDER, regex_flags=_REGEX_FLAGS,
                   section_sep=_SECTION_SEPARATOR, priority_sep=_PRIORITY_SEPARATOR,
                   default=None):
-        def part_exchanger(part):
-            if isinstance(part, re.Pattern):
-                return part
-            if isinstance(part, str):
+        def expr_normalizer(expr):
+            if expr is None:
+                return None
+            if isinstance(expr, re.Pattern):
+                return expr
+            if isinstance(expr, str):
                 for finder, replacement in (mapper or {}).items():
-                    if (isinstance(finder, str) and finder.casefold() in part.casefold()) \
-                            or (isinstance(finder, re.Pattern) and finder.match(part)):
+                    if finder.match(expr):
                         return replacement
 
-                part_matcher = regex_finder and re.match(regex_finder, part)
+                part_matcher = regex_finder and re.match(regex_finder, expr)
                 if part_matcher:
                     part_pattern = part_matcher.group('pattern')
-                    if not part_pattern:
-                        raise ValueError('\'regex_finder\' does not contain a group named \'pattern\'')
                     return re.compile(part_pattern, regex_flags or 0)
-                return part
-            return None
 
-        def part_normalizer(part):
-            return lang_formatter(part) \
-                if lang_formatter and isinstance(part, str) \
-                else part
+            formatted_expr = LangSelector.format_expr(expr, expr_formatter)
+            if not formatted_expr:
+                raise TypeError(f'invalid expression: \'{expr}\'')
+            return formatted_expr
 
         def section_normalizer(section):
-            parts = (re.split(priority_sep, section) if priority_sep else [section]) \
+            expressions = (re.split(priority_sep, section) if priority_sep else [section]) \
                 if isinstance(section, str) else section
-            return list(filter(None, map(part_normalizer, map(part_exchanger, parts))))
+            return list(map(expr_normalizer, expressions))
 
         selection = selection or ([[default]] if default else [])
         sections = (re.split(section_sep, selection) if section_sep else [selection]) \
             if isinstance(selection, str) else selection
-        return list(filter(None, map(section_normalizer, filter(None, sections)))), lang_formatter
+        return list(filter(None, map(section_normalizer, filter(None, sections)))), expr_formatter
 
     @staticmethod
-    def format_lang(lang, formatter):
-        lang = lang or ''
-        if formatter and isinstance(lang, str):
-            lang = formatter(lang)
-        return lang
+    def format_expr(expr, formatter):
+        return formatter(expr) if expr and formatter else expr
 
     @staticmethod
-    def format_langs(langs, formatter):
-        def lang_formatter(lang):
-            return LangSelector.format_lang(lang, formatter)
-        return list(map(lang_formatter, langs))
+    def format_expr_list(expr_list, formatter):
+        def expr_formatter(expr):
+            return LangSelector.format_expr(expr, formatter)
+        return list(map(expr_formatter, expr_list))
 
     @staticmethod
-    def format_lang_table(lang_table, formatter):
-        if isinstance(lang_table, dict):
-            lang_table = lang_table.items()
-        lang_table = [(key, LangSelector.format_lang(lang, formatter))
-                      for key, lang in lang_table]
-        return lang_table, list(map(lambda elem: elem[1], lang_table))
+    def format_expr_table(expr_table, formatter):
+        if isinstance(expr_table, dict):
+            expr_table = expr_table.items()
+        expr_table = [(key, LangSelector.format_expr(expr, formatter))
+                      for key, expr in expr_table]
+        return expr_table, list(map(lambda elem: elem[1], expr_table))
 
     @staticmethod
-    def _expression_matches(expr, lang):
-        if isinstance(expr, re.Pattern):
-            return expr.fullmatch(lang)
-        elif isinstance(expr, str):
-            return lang == expr
-        return False
-
-    @staticmethod
-    def find_match_in_section(section, langs, matcher=_expression_matches):
-        for part in section:
-            matching_lang = next((lang for lang in langs if matcher(part, lang)), None)
+    def find_match_in_section(section, langs, matcher=_EXPR_MATCHER):
+        for expr in section:
+            matching_lang = next((lang for lang in langs if matcher(expr, lang)), None)
             if matching_lang:
                 return matching_lang
         return None
 
     @staticmethod
-    def find_match_in_selection(selection, target, langs, matcher=_expression_matches):
+    def find_match_in_selection(selection, target, langs, matcher=_EXPR_MATCHER):
         for section in selection:
             matching_lang = LangSelector.find_match_in_section(section, langs, matcher)
             if matching_lang and matcher(target, matching_lang):
@@ -6619,29 +6620,29 @@ class LangSelector:
         return None
 
     @staticmethod
-    def get_matches_in_selection(selection, langs, matcher=_expression_matches):
+    def get_matches_in_selection(selection, langs, matcher=_EXPR_MATCHER):
         def match_finder(section):
             return LangSelector.find_match_in_section(section, langs, matcher)
         return set(map(match_finder, selection))
 
-    def __init__(self, selection, mapper=None, default_key=None, **kwargs):
+    def __init__(self, selection, mapper=None, default_val=None, **kwargs):
         if mapper is None:
-            mapper = LangSelector.get_standard_mapper(default_key)
+            mapper = LangSelector.get_standard_mapper(default_val)
 
         self.selection, self.formatter = LangSelector.normalize(
-            selection, mapper, default=default_key, **kwargs)
+            selection, mapper, default=default_val, **kwargs)
 
-    def matches(self, target, langs, matcher=_expression_matches):
-        target = LangSelector.format_lang(target, self.formatter)
-        langs = LangSelector.format_langs(langs, self.formatter)
+    def matches(self, target, langs, matcher=_EXPR_MATCHER):
+        target = LangSelector.format_expr(target, self.formatter)
+        langs = LangSelector.format_expr_list(langs, self.formatter)
         return LangSelector.find_match_in_selection(self.selection, target, langs, matcher)
 
-    def get_matches(self, lang_table, matcher=_expression_matches):
-        lang_table, langs = LangSelector.format_lang_table(lang_table, self.formatter)
+    def get_matches(self, lang_table, matcher=_EXPR_MATCHER):
+        lang_table, langs = LangSelector.format_expr_table(lang_table, self.formatter)
         matching_langs = LangSelector.get_matches_in_selection(self.selection, langs, matcher)
         return lang_table, matching_langs
 
-    def keep_matches(self, lang_table, matcher=_expression_matches):
+    def keep_matches(self, lang_table, matcher=_EXPR_MATCHER):
         lang_table, matching_langs = self.get_matches(lang_table, matcher)
         key_keeper = lambda elem: elem[0]
         lang_filter = lambda elem: elem[1] in matching_langs

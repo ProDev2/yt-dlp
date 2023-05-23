@@ -1806,7 +1806,16 @@ The following extractors use this feature:
 #### crunchyrollbeta (Crunchyroll)
 * `format`: Which stream type(s) to extract (default: `adaptive_hls`). Potentially useful values include `adaptive_hls`, `adaptive_dash`, `vo_adaptive_hls`, `vo_adaptive_dash`, `download_hls`, `download_dash`, `multitrack_adaptive_hls_v2`
 * `hardsub`: Preference order for which hardsub versions to extract, or `all` (default: `None` = no hardsubs), e.g. `crunchyrollbeta:hardsub=en-US,None`
-* `language`: Specify the languages to extract. `default` (default language of the given URL), `all` (all possible languages), `unknown` (all unknown languages) and `<some-lang-code>` (specific language code e.g. `ja-JP` or `en-US`) can be used. (Note: Extracting languages other than `default` can significantly slow down the extraction process) <br> e.g. `crunchyrollbeta:language=default,ja-JP,unknown` -> Extract the URL\'s language, japanese and all unknown languages. <br> **NOTE:** This argument can also be used for playlists. Here `default` (default behavior) and `all` both do the same thing (they extract all languages in the playlist)
+* `language`: Extract specific languages from episodes and playlists. (For playlists, `default` means default behavior and therefore does the same as `all`) <br> **Note:** Extracting languages other than `default` can significantly slow down the extraction process <br> **Usage:**
+  * `default` or `~` (default language of the given URL)
+  * `all` or `*` (all available languages)
+  * `unknown` or `?` (all unknown languages)
+  * `{lang-code}` (specific language code e.g. `ja-JP` or `en-US`)
+  * `${lang-code-regex}` (specific language code using regex e.g. `$ja.*` or `$en.*`)
+  * `{any1} > {any2}` (prioritize something over something else -> Try `any1`, if not available `any2` e.g. `$ja.* > en-US > ~`)
+  * `{group1}, {group2}` (separate different `priority groups` by `,` e.g. `$ja.* > ~, $en.*`)
+  * **Hint:** Escape a character by prefixing it with ` \ `
+  * **Example:** `crunchyrollbeta:language=$ja.* > ~, $en.*` -> Extract langs starting with `ja` or default and also langs starting with `en`
 
 #### vikichannel
 * `video_types`: Types of videos to download - one or more of `episodes`, `movies`, `clips`, `trailers`

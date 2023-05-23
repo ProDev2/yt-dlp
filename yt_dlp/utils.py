@@ -6618,7 +6618,7 @@ class LangSelector:
             expr_table = expr_table.items()
         expr_table = [(key, LangSelector.format_expr(expr, formatter))
                       for key, expr in expr_table]
-        return expr_table, list(map(lambda elem: elem[1], expr_table))
+        return expr_table, [expr for _, expr in expr_table]
 
     @staticmethod
     def find_match_in_section(section, langs, matcher=_EXPR_MATCHER):
@@ -6676,9 +6676,8 @@ class LangSelector:
 
     def keep_table_matches(self, lang_table):
         lang_table, matching_langs = self.get_table_matches(lang_table)
-        key_keeper = lambda elem: elem[0]
-        lang_filter = lambda elem: elem[1] in matching_langs
-        return set(map(key_keeper, filter(lang_filter, lang_table)))
+        return {key for key, expr in lang_table
+                for lang in matching_langs if self.matcher(expr, lang)}
 
 
 # Deprecated

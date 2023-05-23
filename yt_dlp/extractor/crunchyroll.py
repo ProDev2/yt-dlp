@@ -450,9 +450,12 @@ class CrunchyrollBetaIE(CrunchyrollCmsBaseIE):
             return traverse_obj(self._call_api(
                 f'objects/{requested_id}', requested_id, lang, 'object info', {'ratings': 'true'}), ('data', 0, {dict}))
 
+        # Fetch and 'sectionize' target languages (put them into sections, so they do not get split)
+        target_langs = traverse_obj(smuggled_data, ('target_audio_langs', {list}))
+        target_langs = target_langs and list(map(lambda l: [l], target_langs))
+
         # Fetch requested language responses
-        requested_langs = traverse_obj(smuggled_data, ('target_audio_langs', {list}))
-        requested_langs = requested_langs or self._get_requested_langs_from_extractor_args()
+        requested_langs = target_langs or self._get_requested_langs_from_extractor_args()
         responses = self._get_responses_for_langs(internal_id, get_response_by_id, requested_langs)
         if not responses:
             raise ExtractorError(
@@ -614,20 +617,28 @@ class CrunchyrollBetaShowIE(CrunchyrollCmsBaseIE):
                 for episode_response in traverse_obj(episodes_response, ('items', ..., {dict})):
                     yield episode_response["id"], episode_response
 
-        episode_table = [(eid, self._get_audio_langs_from_data(resp) or {}, resp)
+        # Fetch all episode responses for playlist and extract all audio langs
+        episode_table = [(eid, self._get_audio_langs_from_data(resp) or [], resp)
                          for eid, resp in episode_responses() if eid]
+        # Include None in 'episode_langs' if the language of any episode is unknown
         episode_langs = {lang for _, langs, _ in episode_table
                          for lang in (langs or [None])}
+        # Default behavior (extract everything) is always available, therefore add it
         episode_langs.add(default_lang)
+
+        # Get all requested langs (formatted) that are available
         matching_langs = requested_lang_selector.get_list_matches(episode_langs)
         matching_default = requested_lang_selector.has_match(default_lang, matching_langs)
 
         def entries():
             for ep_id, ep_langs, ep_response in episode_table:
-                if matching_default or requested_lang_selector.has_matches(
-                        ep_langs or [None], matching_langs):
+                # If 'default' is part of 'matching_langs' use default behavior (which means extract any episode)
+                # NOTE: If 'ep_langs' is empty 'has_matches' will search for unknown/None lang in 'matching_langs'
+                matching_ep_langs = requested_lang_selector.has_matches(ep_langs, matching_langs) \
+                    if not matching_default else ['~']
+                if matching_ep_langs:
                     smuggled_data = {
-                        'target_audio_langs': list(ep_langs) or ['~'],
+                        'target_audio_langs': matching_ep_langs,
                     }
 
                     yield self.url_result(

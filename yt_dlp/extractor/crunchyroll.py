@@ -135,7 +135,7 @@ class CrunchyrollBaseIE(InfoExtractor):
         # Requested Language options:
         # 'default' or '~'     = Include audio language of video with 'internal_id'
         # 'unknown' or '?'     = Include all unknown audio languages
-        # 'all'     or '*'     = Include all possible languages (will override all other options)
+        # 'all'     or '*'     = Include all possible languages
         # '{lang-code}'        = Include specific audio language e.g. 'ja-JP' or 'en-US'
         # '${lang-code-regex}' = Include specific audio language using regex e.g. '$ja.*' or '$en.*'
         # '{any1} > {any2}'    = Priority group -> Try `any1`, if not available `any2`

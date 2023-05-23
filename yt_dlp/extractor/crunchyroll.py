@@ -174,12 +174,21 @@ class CrunchyrollBaseIE(InfoExtractor):
                 f'No video with id {internal_id} could be found (possibly region locked?)',
                 expected=True)
         default_meta = get_meta_from_response(default_response)
+        default_langs = default_meta and langs_fetcher(default_meta)
 
-        # Build lang table and keep selected langs
+        # Build default lang table
+        default_lang_table = [(internal_id, default_lang)]
+        # Include None in 'default_lang_table' if the language of the default version is unknown
+        default_lang_table.extend((internal_id, lang) for lang in (default_langs or [None]))
+
+        # Build lang table
         versions = (default_meta and traverse_obj(default_meta, 'versions')) or []
         lang_table = [(version.get('guid'), langs_fetcher(version)) for version in versions]
+        # Include None in 'lang_table' if the language of a version is unknown
         lang_table = [(vid, lang) for vid, langs in lang_table if vid for lang in (langs or [None])]
-        lang_table.append((internal_id, default_lang))
+        # Default lang ('internal_id') is always available, therefore add it
+        lang_table.extend(default_lang_table)
+        # Get all requested video ids that are available
         requested_ids = requested_lang_selector.keep_table_matches(lang_table)
 
         # Result dict to store requested responses in
@@ -196,6 +205,7 @@ class CrunchyrollBaseIE(InfoExtractor):
                     self.to_screen(
                         f'Requested video version with id {vid} could not be found (possibly region locked?)',
                         only_once=True)
+                    continue
             results[vid] = requested_response
         return results
 

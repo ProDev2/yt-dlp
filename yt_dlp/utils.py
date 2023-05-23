@@ -6543,13 +6543,17 @@ class LangSelector:
 
     @staticmethod
     def get_standard_mapper(default_val=None):
-        mapper = {
+        return {
+            **LangSelector.get_default_only_mapper(default_val),
             LangSelector.ALL_FINDER: LangSelector.ALL_PATTERN,
             LangSelector.UNKNOWN_FINDER: None,
         }
-        if default_val:
-            mapper[LangSelector.DEFAULT_FINDER] = default_val
-        return mapper
+
+    @staticmethod
+    def get_default_only_mapper(default_val=None):
+        return {
+            LangSelector.DEFAULT_FINDER: default_val
+        } if default_val else {}
 
     @staticmethod
     def normalize(selection, mapper=None,
@@ -6600,7 +6604,7 @@ class LangSelector:
 
     @staticmethod
     def format_expr(expr, formatter):
-        return formatter(expr) if expr and formatter else expr
+        return formatter(expr) if formatter else expr
 
     @staticmethod
     def format_expr_list(expr_list, formatter):
@@ -6656,7 +6660,7 @@ class LangSelector:
                 for lang in matching_langs if self.matcher(target, lang)]
 
     def has_matches(self, targets, matching_langs):
-        targets = LangSelector.format_expr_list(targets, self.formatter)
+        targets = LangSelector.format_expr_list(targets or [None], self.formatter)
         return [lang for target in targets
                 for lang in matching_langs if self.matcher(target, lang)]
 

@@ -243,7 +243,7 @@ class CrunchyrollBaseIE(InfoExtractor):
         return results
 
     def _extract_formats(self, stream_response, display_id=None):
-        requested_formats = self._configuration_arg('format') or ['adaptive_hls']
+        requested_formats = self._configuration_arg('format') or ['vo_adaptive_hls']
         available_formats = {}
         for stream_type, streams in traverse_obj(
                 stream_response, (('streams', ('data', 0)), {dict.items}, ...)):
@@ -708,7 +708,7 @@ class CrunchyrollMusicIE(CrunchyrollBaseIE):
             'track': 'Egaono Hana',
             'artist': 'Goose house',
             'thumbnail': r're:(?i)^https://www.crunchyroll.com/imgsrv/.*\.jpeg?$',
-            'genre': ['J-Pop'],
+            'genres': ['J-Pop'],
         },
         'params': {'skip_download': 'm3u8'},
     }, {
@@ -721,7 +721,7 @@ class CrunchyrollMusicIE(CrunchyrollBaseIE):
             'track': 'Crossing Field',
             'artist': 'LiSA',
             'thumbnail': r're:(?i)^https://www.crunchyroll.com/imgsrv/.*\.jpeg?$',
-            'genre': ['Anime'],
+            'genres': ['Anime'],
         },
         'params': {'skip_download': 'm3u8'},
     }, {
@@ -735,7 +735,7 @@ class CrunchyrollMusicIE(CrunchyrollBaseIE):
             'artist': 'LiSA',
             'thumbnail': r're:(?i)^https://www.crunchyroll.com/imgsrv/.*\.jpeg?$',
             'description': 'md5:747444e7e6300907b7a43f0a0503072e',
-            'genre': ['J-Pop'],
+            'genres': ['J-Pop'],
         },
         'params': {'skip_download': 'm3u8'},
     }, {
@@ -788,7 +788,7 @@ class CrunchyrollMusicIE(CrunchyrollBaseIE):
                     'width': ('width', {int_or_none}),
                     'height': ('height', {int_or_none}),
                 }),
-                'genre': ('genres', ..., 'displayValue'),
+                'genres': ('genres', ..., 'displayValue'),
                 'age_limit': ('maturity_ratings', -1, {parse_age_limit}),
             }),
         }
@@ -805,7 +805,7 @@ class CrunchyrollArtistIE(CrunchyrollBaseIE):
         'info_dict': {
             'id': 'MA179CB50D',
             'title': 'LiSA',
-            'genre': ['J-Pop', 'Anime', 'Rock'],
+            'genres': ['J-Pop', 'Anime', 'Rock'],
             'description': 'md5:16d87de61a55c3f7d6c454b73285938e',
         },
         'playlist_mincount': 83,
@@ -839,6 +839,6 @@ class CrunchyrollArtistIE(CrunchyrollBaseIE):
                     'width': ('width', {int_or_none}),
                     'height': ('height', {int_or_none}),
                 }),
-                'genre': ('genres', ..., 'displayValue'),
+                'genres': ('genres', ..., 'displayValue'),
             }),
         }
